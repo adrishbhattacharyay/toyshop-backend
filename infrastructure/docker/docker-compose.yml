@@ -1,0 +1,243 @@
+version: '3.8'
+
+services:
+  # Service Discovery (Eureka)
+  eureka-server:
+    image: openjdk:17-alpine
+    container_name: toyshop-eureka
+    ports:
+      - "8761:8761"
+    volumes:
+      - ../..:/app
+    working_dir: /app
+    command: >
+      sh -c "cd service-discovery && mvn spring-boot:run"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    networks:
+      - toyshop-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8761/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: toyshop-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: toyshop
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - toyshop-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: toyshop-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - toyshop-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Kafka
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: toyshop-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    depends_on:
+      - zookeeper
+    networks:
+      - toyshop-network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: toyshop-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    networks:
+      - toyshop-network
+
+  # MinIO (S3-compatible storage)
+  minio:
+    image: minio/minio:latest
+    container_name: toyshop-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - toyshop-network
+
+  # User Service
+  user-service:
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    container_name: toyshop-user-service
+    ports:
+      - "8081:8081"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - DATABASE_HOST=postgres
+      - REDIS_HOST=redis
+      - KAFKA_HOST=kafka
+      - EUREKA_SERVER_URL=http://eureka-server:8761/eureka
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      eureka-server:
+        condition: service_healthy
+    networks:
+      - toyshop-network
+
+  # Product Service
+  product-service:
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    container_name: toyshop-product-service
+    ports:
+      - "8082:8082"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - DATABASE_HOST=postgres
+      - REDIS_HOST=redis
+      - KAFKA_HOST=kafka
+      - EUREKA_SERVER_URL=http://eureka-server:8761/eureka
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      eureka-server:
+        condition: service_healthy
+    networks:
+      - toyshop-network
+
+  # Order Service
+  order-service:
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    container_name: toyshop-order-service
+    ports:
+      - "8083:8083"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - DATABASE_HOST=postgres
+      - KAFKA_HOST=kafka
+      - EUREKA_SERVER_URL=http://eureka-server:8761/eureka
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      eureka-server:
+        condition: service_healthy
+    networks:
+      - toyshop-network
+
+  # Payment Service
+  payment-service:
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    container_name: toyshop-payment-service
+    ports:
+      - "8084:8084"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - DATABASE_HOST=postgres
+      - KAFKA_HOST=kafka
+      - EUREKA_SERVER_URL=http://eureka-server:8761/eureka
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      eureka-server:
+        condition: service_healthy
+    networks:
+      - toyshop-network
+
+  # Notification Service
+  notification-service:
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    container_name: toyshop-notification-service
+    ports:
+      - "8085:8085"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - KAFKA_HOST=kafka
+      - EUREKA_SERVER_URL=http://eureka-server:8761/eureka
+    depends_on:
+      kafka:
+        condition: service_started
+      eureka-server:
+        condition: service_healthy
+    networks:
+      - toyshop-network
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    container_name: toyshop-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - EUREKA_SERVER_URL=http://eureka-server:8761/eureka
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+    networks:
+      - toyshop-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+
+networks:
+  toyshop-network:
+    driver: bridge
