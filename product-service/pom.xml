@@ -46,6 +46,12 @@
             <artifactId>spring-kafka</artifactId>
         </dependency>
 
+        <!-- Eureka Client -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+        </dependency>
+
         <!-- AWS S3 -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>

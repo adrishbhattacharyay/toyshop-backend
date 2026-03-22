@@ -8,6 +8,12 @@ spring:
     exclude:
       - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
       - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+  security:
+    user:
+      name: eureka
+      password: eureka123
+    basic:
+      enabled: false
 
 eureka:
   instance:
