@@ -31,6 +31,7 @@ public class UserService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final KafkaTemplate<String, UserEvent> kafkaTemplate;
+    private final com.toyshop.user.security.JwtUtil jwtUtil;
     private static final String USER_EVENTS_TOPIC = "user-events";
 
     @Transactional
@@ -286,11 +287,5 @@ public class UserService {
                 .timestamp(LocalDateTime.now())
                 .build();
         kafkaTemplate.send(USER_EVENTS_TOPIC, event);
-    }
-
-    private com.toyshop.user.security.JwtUtil jwtUtil;
-
-    public void setJwtUtil(com.toyshop.user.security.JwtUtil jwtUtil) {
-        this.jwtUtil = jwtUtil;
     }
 }

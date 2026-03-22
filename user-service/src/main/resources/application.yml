@@ -5,6 +5,11 @@ spring:
   application:
     name: user-service
 
+  sql:
+    init:
+      mode: always
+      continue-on-error: true
+
   datasource:
     url: jdbc:postgresql://localhost:5432/toyshop_users
     username: toyshop
