@@ -28,6 +28,16 @@ management:
     web:
       exposure:
         include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+  health:
+    kafka:
+      enabled: false
+    binders:
+      enabled: false
+    mail:
+      enabled: false
 
 logging:
   level:

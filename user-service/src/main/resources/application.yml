@@ -4,21 +4,10 @@ server:
 spring:
   application:
     name: user-service
-  cloud:
-    eureka:
-      client:
-        service-url:
-          defaultZone: http://localhost:8761/eureka/
-        register-with-eureka: true
-        fetch-registry: true
-        healthcheck:
-          enabled: true
-
   sql:
     init:
       mode: always
       continue-on-error: true
-
   datasource:
     url: jdbc:postgresql://localhost:5432/toyshop_users
     username: toyshop
@@ -28,7 +17,6 @@ spring:
       maximum-pool-size: 10
       minimum-idle: 5
       connection-timeout: 30000
-
   jpa:
     hibernate:
       ddl-auto: update
@@ -38,7 +26,6 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
         default_schema: public
-
   data:
     redis:
       host: localhost
@@ -49,7 +36,6 @@ spring:
           max-active: 8
           max-idle: 8
           min-idle: 2
-
   kafka:
     bootstrap-servers: localhost:9092
     producer:
@@ -63,32 +49,27 @@ spring:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
 
-# Mail configuration disabled for development
-#  mail:
-#    host: localhost
-#    port: 1025
-#    username: toyshop
-#    password: toyshop
-#    properties:
-#      mail:
-#        smtp:
-#          auth: false
-#          starttls:
-#            enable: false
-#    test-connection: false
+eureka:
+  instance:
+    hostname: localhost
+    prefer-ip-address: false
+    instance-id: ${spring.application.name}:${server.port}
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+    register-with-eureka: true
+    fetch-registry: true
 
-# Application specific configuration
 app:
   host: http://localhost:8081
   jwt:
     secret: toyshop-jwt-secret-key-must-be-at-least-256-bits-long-for-hs256
-    expiration: 86400000  # 24 hours in milliseconds
-    refresh-expiration: 604800000  # 7 days in milliseconds
+    expiration: 86400000
+    refresh-expiration: 604800000
   cache:
-    user-ttl: 3600  # 1 hour
-    session-ttl: 1800  # 30 minutes
+    user-ttl: 3600
+    session-ttl: 1800
 
-# Actuator and Monitoring
 management:
   endpoints:
     web:
@@ -97,19 +78,7 @@ management:
   endpoint:
     health:
       show-details: always
-  metrics:
-    tags:
-      application: ${spring.application.name}
 
-# OpenTelemetry
-otel:
-  service:
-    name: user-service
-  exporter:
-    otlp:
-      endpoint: http://localhost:4317
-
-# Logging
 logging:
   level:
     root: INFO

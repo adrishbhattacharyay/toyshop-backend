@@ -14,30 +14,21 @@ spring:
           uri: lb://user-service
           predicates:
             - Path=/api/v1/auth/**,/api/v1/users/**
-          filters:
-            - RewritePath=/api/v1/auth/(?<segment>.*),/api/v1/auth/$\{segment}
-            - RewritePath=/api/v1/users/(?<segment>.*),/api/v1/users/$\{segment}
 
         - id: product-service
           uri: lb://product-service
           predicates:
             - Path=/api/v1/products/**
-          filters:
-            - RewritePath=/api/v1/products/(?<segment>.*),/api/v1/products/$\{segment}
 
         - id: order-service
           uri: lb://order-service
           predicates:
             - Path=/api/v1/orders/**
-          filters:
-            - RewritePath=/api/v1/orders/(?<segment>.*),/api/v1/orders/$\{segment}
 
         - id: payment-service
           uri: lb://payment-service
           predicates:
             - Path=/api/v1/payments/**
-          filters:
-            - RewritePath=/api/v1/payments/(?<segment>.*),/api/v1/payments/$\{segment}
 
       default-filters:
         - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_UNIQUE
@@ -59,33 +50,22 @@ spring:
             allowCredentials: true
             maxAge: 3600
 
-  resilience4j:
-    circuitbreaker:
-      configs:
-        default:
-          registerHealthIndicator: true
-          slidingWindowSize: 10
-          minimumNumberOfCalls: 5
-          permittedNumberOfCallsInHalfOpenState: 3
-          automaticTransitionFromOpenToHalfOpenEnabled: true
-          waitDurationInOpenState: 5s
-          failureRateThreshold: 50
-    retry:
-      configs:
-        default:
-          maxAttempts: 3
-          waitDuration: 500ms
-          enableExponentialBackoff: true
-          exponentialBackoffMultiplier: 2
+eureka:
+  instance:
+    hostname: localhost
+    prefer-ip-address: false
+    instance-id: ${spring.application.name}:${server.port}
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+    register-with-eureka: false
+    fetch-registry: true
 
 management:
   endpoints:
     web:
       exposure:
         include: health,info,metrics,prometheus
-  health:
-    circuitbreakers:
-      enabled: true
 
 logging:
   level:

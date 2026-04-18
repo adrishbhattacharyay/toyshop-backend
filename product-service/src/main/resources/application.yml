@@ -4,40 +4,36 @@ server:
 spring:
   application:
     name: product-service
-
-  cloud:
-    eureka:
-      client:
-        service-url:
-          defaultZone: http://localhost:8761/eureka/
-        register-with-eureka: true
-        fetch-registry: true
-        healthcheck:
-          enabled: true
-
   datasource:
     url: jdbc:postgresql://localhost:5432/toyshop_products
     username: toyshop
     password: toyshop_secret
     driver-class-name: org.postgresql.Driver
-
   jpa:
     hibernate:
       ddl-auto: update
     show-sql: false
-
   data:
     redis:
       host: localhost
       port: 6379
-
   kafka:
     bootstrap-servers: localhost:9092
-
   servlet:
     multipart:
       max-file-size: 10MB
       max-request-size: 10MB
+
+eureka:
+  instance:
+    hostname: localhost
+    prefer-ip-address: false
+    instance-id: ${spring.application.name}:${server.port}
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+    register-with-eureka: true
+    fetch-registry: true
 
 app:
   aws:
