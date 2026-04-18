@@ -15,7 +15,7 @@ import java.math.BigDecimal;
 public class OrderItemRequest {
 
     @NotNull(message = "Product ID is required")
-    private Long productId;
+    private String productId;
 
     @NotBlank(message = "Product SKU is required")
     @Size(max = 50, message = "Product SKU must not exceed 50 characters")

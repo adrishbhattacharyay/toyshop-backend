@@ -215,15 +215,19 @@ public class OrderService {
     }
 
     private void publishOrderEvent(Order order, OrderEventType eventType) {
-        OrderEvent event = OrderEvent.builder()
-                .orderId(order.getId())
-                .orderNumber(order.getOrderNumber())
-                .userId(order.getUserId())
-                .status(order.getStatus())
-                .totalAmount(order.getTotalAmount())
-                .eventType(eventType)
-                .timestamp(LocalDateTime.now())
-                .build();
-        kafkaTemplate.send(ORDER_EVENTS_TOPIC, event);
+        try {
+            OrderEvent event = OrderEvent.builder()
+                    .orderId(order.getId())
+                    .orderNumber(order.getOrderNumber())
+                    .userId(order.getUserId())
+                    .status(order.getStatus())
+                    .totalAmount(order.getTotalAmount())
+                    .eventType(eventType)
+                    .timestamp(LocalDateTime.now())
+                    .build();
+            kafkaTemplate.send(ORDER_EVENTS_TOPIC, event);
+        } catch (Exception e) {
+            log.warn("Failed to publish order event (non-fatal): {}", e.getMessage());
+        }
     }
 }

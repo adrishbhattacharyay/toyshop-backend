@@ -214,12 +214,16 @@ public class UserService {
         log.info("User deleted successfully with ID: {}", id);
 
         // Publish user deletion event
-        UserEvent event = UserEvent.builder()
-                .userId(id)
-                .eventType(UserEventType.DELETED)
-                .timestamp(LocalDateTime.now())
-                .build();
-        kafkaTemplate.send(USER_EVENTS_TOPIC, event);
+        try {
+            UserEvent event = UserEvent.builder()
+                    .userId(id)
+                    .eventType(UserEventType.DELETED)
+                    .timestamp(LocalDateTime.now())
+                    .build();
+            kafkaTemplate.send(USER_EVENTS_TOPIC, event);
+        } catch (Exception e) {
+            log.warn("Failed to publish delete event (non-fatal): {}", e.getMessage());
+        }
     }
 
     @Transactional
@@ -279,13 +283,17 @@ public class UserService {
     }
 
     private void publishUserEvent(User user, UserEventType eventType) {
-        UserEvent event = UserEvent.builder()
-                .userId(user.getId())
-                .username(user.getUsername())
-                .email(user.getEmail())
-                .eventType(eventType)
-                .timestamp(LocalDateTime.now())
-                .build();
-        kafkaTemplate.send(USER_EVENTS_TOPIC, event);
+        try {
+            UserEvent event = UserEvent.builder()
+                    .userId(user.getId())
+                    .username(user.getUsername())
+                    .email(user.getEmail())
+                    .eventType(eventType)
+                    .timestamp(LocalDateTime.now())
+                    .build();
+            kafkaTemplate.send(USER_EVENTS_TOPIC, event);
+        } catch (Exception e) {
+            log.warn("Failed to publish user event (non-fatal): {}", e.getMessage());
+        }
     }
 }

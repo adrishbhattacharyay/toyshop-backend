@@ -58,18 +58,28 @@ public class ProductController {
     }
 
     @GetMapping
-    @Operation(summary = "Get all products with pagination")
+    @Operation(summary = "Get all products with pagination and optional filters")
     public ResponseEntity<Page<ProductResponse>> getAllProducts(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "createdAt") String sortBy,
-            @RequestParam(defaultValue = "desc") String sortDir
+            @RequestParam(defaultValue = "desc") String sortDir,
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String keyword
     ) {
-        log.debug("Getting all products - page: {}, size: {}", page, size);
+        log.debug("Getting products - page:{} size:{} category:{} keyword:{}", page, size, category, keyword);
         Sort sort = sortDir.equalsIgnoreCase("asc") ?
                 Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
         Pageable pageable = PageRequest.of(page, size, sort);
-        Page<ProductResponse> products = productService.getAllProducts(pageable);
+
+        Page<ProductResponse> products;
+        if (keyword != null && !keyword.isBlank()) {
+            products = productService.searchProducts(keyword, pageable);
+        } else if (category != null && !category.isBlank()) {
+            products = productService.getProductsByCategory(category, pageable);
+        } else {
+            products = productService.getAllProducts(pageable);
+        }
         return ResponseEntity.ok(products);
     }
 
