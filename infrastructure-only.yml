@@ -61,6 +61,16 @@ services:
     ports:
       - "2181:2181"
 
+  # MailHog - fake SMTP for local email testing
+  # Catches all outgoing emails - no real email sent
+  # SMTP: localhost:1025  |  Web UI: http://localhost:8025
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: toyshop-mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
 volumes:
   postgres_data:
   redis_data:

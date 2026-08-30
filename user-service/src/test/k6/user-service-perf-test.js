@@ -1,133 +1,75 @@
+/**
+ * User Service — Smoke Test
+ *
+ * Minimal single-VU run to verify the service is up and all endpoints
+ * respond correctly before running the full load test.
+ *
+ * Run:
+ *   k6 run user-service-perf-test.js
+ */
 import http from 'k6/http';
 import { check, sleep } from 'k6';
-import { Rate, Trend } from 'k6/metrics';
+import { Rate } from 'k6/metrics';
+import { BASE_URL, JSON_HEADERS, registerUser, authHeaders } from './lib/auth.js';
+import { htmlReport } from './lib/report.js';
 
-// Custom metrics
 const errorRate = new Rate('errors');
-const loginDuration = new Trend('login_duration');
-const registerDuration = new Trend('register_duration');
-const getUserDuration = new Trend('get_user_duration');
 
-// Test configuration
 export const options = {
-  stages: [
-    { duration: '10s', target: 10 },  // Ramp up
-    { duration: '30s', target: 50 },  // Stay at 50 users
-    { duration: '10s', target: 0 },   // Ramp down
-  ],
+  vus: 1,
+  iterations: 5,
   thresholds: {
-    http_req_duration: ['p(95)<500'],
-    errors: ['rate<0.01'],
-    login_duration: ['p(95)<1000'],
-    register_duration: ['p(95)<1000'],
+    http_req_duration: ['p(95)<2000'],
+    http_req_failed:   ['rate<0.01'],
+    errors:            ['rate<0.01'],
   },
 };
 
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:8081';
-
 export function setup() {
-  // Register a test user for login tests
-  const registerPayload = JSON.stringify({
-    username: `perfuser_${Date.now()}`,
-    email: `perf_${Date.now()}@example.com`,
-    password: 'Password123!',
-    firstName: 'Performance',
-    lastName: 'Test',
-  });
-
-  const registerRes = http.post(`${BASE_URL}/api/v1/auth/register`, registerPayload, {
-    headers: { 'Content-Type': 'application/json' },
-  });
-
-  if (registerRes.status !== 201) {
-    console.log('Registration failed, user might already exist');
-  }
-
-  return { registered: true };
+  const user = registerUser('smoke');
+  if (!user) throw new Error('[smoke] Could not register test user — is the service running?');
+  console.log(`[smoke] Test user: ${user.username} @ ${BASE_URL}`);
+  return { user };
 }
 
 export default function (data) {
-  // Test 1: User Registration
-  const registerStart = new Date();
-  const registerPayload = JSON.stringify({
-    username: `perfuser_${Math.random().toString(36).substring(7)}`,
-    email: `perf_${Math.random().toString(36).substring(7)}@example.com`,
-    password: 'Password123!',
-    firstName: 'Performance',
-    lastName: 'Test',
-  });
+  const { user } = data;
 
-  const registerRes = http.post(`${BASE_URL}/api/v1/auth/register`, registerPayload, {
-    headers: { 'Content-Type': 'application/json' },
-  });
-
-  const registerTime = new Date() - registerStart;
-  registerDuration.add(registerTime);
-
-  const registerOk = check(registerRes, {
-    'registration successful': (r) => r.status === 201,
-    'registration returns user data': (r) => r.json('id') !== undefined,
-  });
-
-  errorRate.add(!registerOk);
-
-  // Test 2: User Login
-  const loginPayload = JSON.stringify({
-    usernameOrEmail: 'testuser',
-    password: 'Password123!',
-  });
-
-  const loginStart = new Date();
-  const loginRes = http.post(`${BASE_URL}/api/v1/auth/login`, loginPayload, {
-    headers: { 'Content-Type': 'application/json' },
-  });
-
-  const loginTime = new Date() - loginStart;
-  loginDuration.add(loginTime);
-
-  let token = null;
+  // Login
+  const loginRes = http.post(
+    `${BASE_URL}/api/v1/auth/login`,
+    JSON.stringify({ usernameOrEmail: user.username, password: user.password }),
+    { headers: JSON_HEADERS }
+  );
   const loginOk = check(loginRes, {
-    'login successful': (r) => r.status === 200,
-    'login returns token': (r) => {
-      token = r.json('accessToken');
-      return token !== undefined;
-    },
+    'smoke login: 200':            (r) => r.status === 200,
+    'smoke login: accessToken':    (r) => r.json('accessToken') !== undefined,
   });
-
   errorRate.add(!loginOk);
+  if (!loginOk) { sleep(1); return; }
 
-  // Test 3: Get User Profile (with auth)
-  if (token) {
-    const getUserStart = new Date();
-    const getUserRes = http.get(`${BASE_URL}/api/v1/users/me`, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-    });
+  const token = loginRes.json('accessToken');
+  const hdrs = authHeaders(token);
 
-    const getUserTime = new Date() - getUserStart;
-    getUserDuration.add(getUserTime);
+  // Profile
+  const profileRes = http.get(`${BASE_URL}/api/v1/users/me`, { headers: hdrs });
+  errorRate.add(!check(profileRes, { 'smoke profile: 200': (r) => r.status === 200 }));
 
-    const getUserOk = check(getUserRes, {
-      'get user successful': (r) => r.status === 200,
-      'get user returns username': (r) => r.json('username') !== undefined,
-    });
-
-    errorRate.add(!getUserOk);
-  }
-
-  // Test 4: Health Check
+  // Health check (direct to gateway actuator)
   const healthRes = http.get(`${BASE_URL}/actuator/health`);
-  const healthOk = check(healthRes, {
-    'health check successful': (r) => r.status === 200,
-  });
-  errorRate.add(!healthOk);
+  errorRate.add(!check(healthRes, { 'smoke health: 200': (r) => r.status === 200 }));
 
-  sleep(1);
+  // Refresh
+  const refreshRes = http.post(
+    `${BASE_URL}/api/v1/auth/refresh`,
+    JSON.stringify({ refreshToken: loginRes.json('refreshToken') }),
+    { headers: JSON_HEADERS }
+  );
+  errorRate.add(!check(refreshRes, { 'smoke refresh: 200': (r) => r.status === 200 }));
+
+  sleep(0.5);
 }
 
-export function teardown(data) {
-  console.log('Performance test completed');
-  console.log(`Error rate: ${errorRate.values.rate}`);
+export function handleSummary(data) {
+  return htmlReport(data, 'user-service-smoke');
 }

@@ -384,12 +384,119 @@ Access Swagger documentation at:
 
 ## Performance Testing
 
-### Run k6 Performance Tests
+### k6 Test Suite Overview
+
+The suite is distributed across each service's `src/test/k6/` folder and targets the
+**API Gateway at `:8080`** — the real production path through Eureka and the load balancer.
+
+| File | What it tests | Scenario |
+|------|--------------|---------|
+| `user-service/src/test/k6/user-service-perf-test.js` | Register, login, profile, refresh | Smoke (1 VU) |
+| `user-service/src/test/k6/performance-test.js` | Auth flows under load | Load (50 VUs) |
+| `product-service/src/test/k6/product-service-perf-test.js` | Browse catalog, get product, create product | Load (80 VUs) |
+| `order-service/src/test/k6/order-service-perf-test.js` | Create order, get order, list, cancel | Load (50 VUs) |
+| `payment-service/src/test/k6/payment-service-perf-test.js` | Initiate payment, get payment | Load (40 VUs) |
+| `user-service/src/test/k6/scenarios/checkout-e2e.js` | **Full purchase journey** (login → browse → order → pay → verify) | smoke / load / stress / soak |
+
+A shared library lives in `user-service/src/test/k6/lib/`:
+- `auth.js` — login/register helpers, `adminLogin()`
+- `report.js` — `handleSummary()` that writes JSON + HTML reports to `reports/`
+
+### Prerequisites
+
+Install k6: https://k6.io/docs/get-started/installation/
 
 ```bash
-cd user-service/src/test/k6
-k6 run performance-test.js
+# Windows (winget)
+winget install k6 --source winget
+
+# macOS
+brew install k6
+
+# Linux
+sudo gpg -k
+sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+  --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
+  | sudo tee /etc/apt/sources.list.d/k6.list
+sudo apt-get update && sudo apt-get install k6
 ```
+
+### Run Tests
+
+**All services (recommended first run):**
+```bash
+# Windows
+run-perf-tests.bat
+
+# Linux / macOS
+chmod +x run-perf-tests.sh && ./run-perf-tests.sh
+```
+
+**Smoke test only (quick sanity check):**
+```bash
+run-perf-tests.bat smoke
+./run-perf-tests.sh smoke
+```
+
+**Single service:**
+```bash
+run-perf-tests.bat products
+run-perf-tests.bat orders
+run-perf-tests.bat payments
+```
+
+**End-to-end checkout (the most realistic test):**
+```bash
+# Load scenario (default)
+run-perf-tests.bat e2e
+
+# Stress scenario — spikes to 80 VUs
+run-perf-tests.bat e2e stress
+
+# Soak test — 10 VUs for 10 minutes
+run-perf-tests.bat e2e soak
+```
+
+**Run a single file directly:**
+```bash
+k6 run user-service/src/test/k6/scenarios/checkout-e2e.js
+k6 run --env BASE_URL=http://staging:8080 --env SCENARIO=stress \
+       user-service/src/test/k6/scenarios/checkout-e2e.js
+```
+
+### Reports
+
+After each run, reports are written to `reports/` in the project root:
+
+```
+reports/
+  user-service-smoke-report.html
+  user-service-smoke-summary.json
+  user-service-load-report.html
+  product-service-load-report.html
+  order-service-load-report.html
+  payment-service-load-report.html
+  checkout-e2e-load-report.html
+```
+
+Open any `.html` file in a browser for a visual dashboard showing:
+- Pass/fail status for all thresholds
+- p(95) / p(99) / avg / max per operation
+- Per-step breakdown (login, browse, create order, payment, verify)
+- Error rate
+
+### SLO Thresholds
+
+| Operation | p(95) target |
+|-----------|-------------|
+| Login | < 500 ms |
+| Browse products | < 400 ms |
+| Get product detail | < 300 ms |
+| Create order | < 1 000 ms |
+| Process payment | < 1 200 ms |
+| Full checkout journey | < 5 000 ms |
+| Error rate (all) | < 5% |
 
 ---
 

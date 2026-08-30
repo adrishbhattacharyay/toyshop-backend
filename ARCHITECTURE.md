@@ -17,6 +17,15 @@
 9. [Infrastructure Diagram (Cloud / Production)](#infrastructure-diagram-cloud--production)
 10. [Deployment Architecture (Kubernetes)](#deployment-architecture-kubernetes)
 11. [Technology Stack](#technology-stack)
+12. [Frontend Architecture](#frontend-architecture)
+13. [API Contract Diagram](#api-contract-diagram)
+14. [Domain Model](#domain-model)
+15. [Order State Machine](#order-state-machine)
+16. [CI/CD Pipeline](#cicd-pipeline)
+17. [Network Topology](#network-topology)
+18. [Observability Stack](#observability-stack)
+19. [Resilience Patterns](#resilience-patterns)
+20. [Data Flow - Product Purchase](#data-flow---product-purchase)
 
 ---
 
@@ -47,6 +56,8 @@ API Gateway  ──►  Service Discovery (Eureka)
 
 ### HLD - Component View
 
+> **Actual MS-to-MS connectivity:** There is NO direct HTTP calls between services. All client traffic routes through the API Gateway. Inter-service communication is **async only via Kafka** (User/Order/Payment → Notification).
+
 ```mermaid
 graph TB
     subgraph Client["Client Layer"]
@@ -58,7 +69,7 @@ graph TB
         SD["Service Discovery\nNetflix Eureka\n:8761"]
     end
 
-    subgraph Services["Microservices Layer"]
+    subgraph Services["Microservices Layer\n(no direct HTTP between services)"]
         US["User Service\n:8081\nAuth · JWT · Profiles"]
         PS["Product Service\n:8082\nCatalog · Inventory"]
         OS["Order Service\n:8083\nOrders · Cart"]
@@ -66,11 +77,11 @@ graph TB
         NS["Notification Service\n:8085\nEmail · Alerts"]
     end
 
-    subgraph Messaging["Async Messaging"]
-        KF["Apache Kafka\n:9092"]
+    subgraph Messaging["Async Messaging (only inter-service channel)"]
+        KF["Apache Kafka\n:9092\nuser-events\norder-events\npayment-events"]
     end
 
-    subgraph Storage["Data Layer"]
+    subgraph Storage["Data Layer (each service owns its DB)"]
         PG1[("PostgreSQL\ntoyshop_users")]
         PG2[("PostgreSQL\ntoyshop_products")]
         PG3[("PostgreSQL\ntoyshop_orders")]
@@ -78,17 +89,17 @@ graph TB
         RD[("Redis Cache\n:6379")]
     end
 
-    FE -->|"HTTP/REST"| GW
-    GW -->|"lb:// service discovery"| SD
+    FE -->|"HTTP/REST via Vite proxy"| GW
+    GW <-->|"lb:// service discovery"| SD
     GW -->|"/api/v1/auth/**\n/api/v1/users/**"| US
     GW -->|"/api/v1/products/**"| PS
     GW -->|"/api/v1/orders/**"| OS
     GW -->|"/api/v1/payments/**"| PMS
 
-    US -->|"user-events"| KF
-    OS -->|"order-events"| KF
-    PMS -->|"payment-events"| KF
-    KF -->|"consume events"| NS
+    US -->|"Publish user-events"| KF
+    OS -->|"Publish order-events"| KF
+    PMS -->|"Publish payment-events"| KF
+    KF -->|"@KafkaListener consume all 3 topics"| NS
 
     US --- PG1
     PS --- PG2
@@ -188,30 +199,27 @@ sequenceDiagram
 
 ### Place Order Flow
 
+> **Note:** Order Service does NOT call Product Service directly. Product details (name, SKU, price) are passed by the frontend in the request body. The only inter-service communication is async via Kafka.
+
 ```mermaid
 sequenceDiagram
     actor User
-    participant GW as API Gateway
+    participant FE as Frontend :5173
+    participant GW as API Gateway :8080
     participant OS as Order Service :8083
-    participant PS as Product Service :8082
-    participant PMS as Payment Service :8084
     participant KF as Kafka
-    participant NS as Notification Service
+    participant NS as Notification Service :8085
 
-    User->>GW: POST /api/v1/orders (JWT)
-    GW->>OS: Forward + validate JWT
-    OS->>PS: Check product availability
-    PS-->>OS: Stock confirmed
-    OS->>OS: Create order (PENDING)
-    OS->>PMS: Initiate payment
-    PMS->>PMS: Process transaction
-    PMS->>KF: Publish payment-events (COMPLETED)
-    PMS-->>OS: Payment confirmed
-    OS->>KF: Publish order-events (CONFIRMED)
+    User->>FE: Fill checkout form\n(items already in cart with price/sku)
+    FE->>GW: POST /api/v1/orders\n{userId, items:[{productId,sku,name,price}], shippingAddress}
+    GW->>OS: Forward request
+    OS->>OS: Calculate subtotal + 18% tax + shipping
+    OS->>OS: Save order to DB (PENDING)
+    OS->>KF: Publish order-events (CREATED)
+    OS-->>GW: 201 Created {orderNumber, totalAmount, status:PENDING}
+    GW-->>FE: Order confirmed
     KF->>NS: Consume order-events
-    NS->>NS: Send confirmation email
-    OS-->>GW: 201 Created (order details)
-    GW-->>User: Order confirmed
+    NS->>NS: log.info("Received event") [stub - email not sent]
 ```
 
 ---
@@ -599,3 +607,360 @@ mindmap
 | Kafka | 9092 | TCP | Event streaming |
 | Zookeeper | 2181 | TCP | Kafka coordination |
 | Frontend (dev) | 5173 | HTTP | Vite dev server |
+
+---
+
+## Frontend Architecture
+
+### React Application Structure
+
+```mermaid
+graph TD
+    subgraph Browser["Browser"]
+        subgraph ReactApp["React 18 + Vite"]
+            MAIN["main.jsx\nBootstrap + Redux Provider"]
+
+            subgraph Routing["React Router v6"]
+                R1["/ → Home"]
+                R2["/products → Products"]
+                R3["/products/:id → ProductDetail"]
+                R4["/cart → Cart"]
+                R5["/checkout → Checkout"]
+                R6["/orders → Orders"]
+                R7["/orders/:id → OrderDetail"]
+                R8["/login → Login"]
+                R9["/register → Register"]
+            end
+
+            subgraph Store["Redux Store"]
+                SA["authSlice\nuser · token · isAuthenticated"]
+                SP["productSlice\nitems · categories · pagination"]
+                SC["cartSlice\nitems (localStorage)"]
+                SO["orderSlice\nitems · currentOrder"]
+            end
+
+            subgraph Services["API Layer"]
+                API["api.js\nAxios instance\nbaseURL: ''"]
+                INT1["Request Interceptor\nAttach JWT Bearer token"]
+                INT2["Response Interceptor\n401 → refresh token\nSkip auth endpoints"]
+            end
+        end
+    end
+
+    subgraph Proxy["Vite Dev Proxy"]
+        PROXY["/api → http://localhost:8080"]
+    end
+
+    MAIN --> Routing
+    MAIN --> Store
+    Store --> Services
+    Services --> Proxy
+    Proxy -->|"Forward"| GW["API Gateway :8080"]
+```
+
+---
+
+## API Contract Diagram
+
+### REST Endpoints by Service
+
+```mermaid
+graph LR
+    subgraph GW["API Gateway :8080"]
+        direction TB
+        AUTH_R["/api/v1/auth/**"]
+        USER_R["/api/v1/users/**"]
+        PROD_R["/api/v1/products/**"]
+        ORD_R["/api/v1/orders/**"]
+        PAY_R["/api/v1/payments/**"]
+    end
+
+    subgraph US["User Service :8081"]
+        direction TB
+        U1["POST /api/v1/auth/register"]
+        U2["POST /api/v1/auth/login"]
+        U3["POST /api/v1/auth/refresh"]
+        U4["GET  /api/v1/users/me"]
+        U5["GET  /api/v1/users/:id"]
+    end
+
+    subgraph PS["Product Service :8082"]
+        direction TB
+        P1["GET  /api/v1/products"]
+        P2["GET  /api/v1/products/:id"]
+        P3["GET  /api/v1/products/categories"]
+        P4["POST /api/v1/products  🔒ADMIN"]
+        P5["PUT  /api/v1/products/:id  🔒ADMIN"]
+    end
+
+    subgraph OS["Order Service :8083"]
+        direction TB
+        O1["POST /api/v1/orders"]
+        O2["GET  /api/v1/orders/:id"]
+        O3["GET  /api/v1/orders/user/:userId"]
+        O4["POST /api/v1/orders/:id/cancel"]
+        O5["PUT  /api/v1/orders/:id/status  🔒ADMIN"]
+    end
+
+    subgraph PMS["Payment Service :8084"]
+        direction TB
+        PM1["POST /api/v1/payments"]
+        PM2["GET  /api/v1/payments/:id"]
+        PM3["PUT  /api/v1/payments/:id/refund  🔒ADMIN"]
+    end
+
+    AUTH_R --> U1 & U2 & U3
+    USER_R --> U4 & U5
+    PROD_R --> P1 & P2 & P3 & P4 & P5
+    ORD_R  --> O1 & O2 & O3 & O4 & O5
+    PAY_R  --> PM1 & PM2 & PM3
+```
+
+---
+
+## Domain Model
+
+### Bounded Contexts & Aggregates
+
+```mermaid
+graph TB
+    subgraph UserDomain["User Domain"]
+        USER["User\n─────────\nid: Long\nusername: String\nemail: String\npassword: BCrypt\nrole: ADMIN|STAFF|CUSTOMER\nenabled: boolean"]
+    end
+
+    subgraph ProductDomain["Product Domain"]
+        PRODUCT["Product\n─────────\nid: UUID\nsku: String\nname: String\nprice: BigDecimal\nstockQuantity: int\ncategory: String\nbrand: String\nstatus: ACTIVE|INACTIVE\nfeatured: boolean"]
+    end
+
+    subgraph OrderDomain["Order Domain"]
+        ORDER["Order\n─────────\nid: Long\norderNumber: String\nuserId: Long\nstatus: PENDING→DELIVERED\npaymentStatus: PENDING|COMPLETED\ntotalAmount: BigDecimal"]
+        ORDERITEM["OrderItem\n─────────\nproductId: String\nproductSku: String\nquantity: int\nunitPrice: BigDecimal\ntotalPrice: BigDecimal"]
+        ORDER ||--o{ ORDERITEM : contains
+    end
+
+    subgraph PaymentDomain["Payment Domain"]
+        PAYMENT["Payment\n─────────\nid: Long\norderId: Long\namount: BigDecimal\nmethod: COD|UPI|CARD\nstatus: PENDING|COMPLETED|FAILED\ntransactionId: String"]
+    end
+
+    ORDER ..->|"userId ref"| USER
+    ORDER ..->|"productId ref"| PRODUCT
+    PAYMENT ..->|"orderId ref"| ORDER
+```
+
+---
+
+## Order State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING : Order Created
+    PENDING --> CONFIRMED : Payment Received
+    PENDING --> CANCELLED : User Cancels / Timeout
+    CONFIRMED --> PROCESSING : Warehouse Picks
+    PROCESSING --> SHIPPED : Dispatched
+    SHIPPED --> DELIVERED : Delivery Confirmed
+    DELIVERED --> COMPLETED : Auto after 7 days
+    CONFIRMED --> CANCELLED : Admin Cancels
+    PROCESSING --> CANCELLED : Admin Cancels
+    COMPLETED --> [*]
+    CANCELLED --> [*]
+
+    note right of PENDING
+        Kafka: order-events.CREATED
+    end note
+    note right of CONFIRMED
+        Kafka: order-events.CONFIRMED
+        Email: Order confirmation sent
+    end note
+    note right of SHIPPED
+        Kafka: order-events.SHIPPED
+        Email: Tracking info sent
+    end note
+```
+
+---
+
+## CI/CD Pipeline
+
+```mermaid
+flowchart LR
+    subgraph Dev["Developer"]
+        CODE["git push\nfeature branch"]
+    end
+
+    subgraph GitHub["GitHub"]
+        PR["Pull Request"]
+        MERGE["Merge to main"]
+    end
+
+    subgraph CI["CI Pipeline (GitHub Actions)"]
+        direction TB
+        BUILD["mvn clean verify\nnpm test -- --run"]
+        TEST["Unit Tests\nIntegration Tests\nPlaywright E2E"]
+        SCAN["Code Quality\nSonarQube / Checkstyle"]
+        DOCKER["docker build\nPush to ECR"]
+    end
+
+    subgraph CD["CD Pipeline"]
+        direction TB
+        STAGING["Deploy to Staging\nkubectl apply"]
+        SMOKE["Smoke Tests\nHealth checks"]
+        PROD["Deploy to Production\nBlue/Green rollout"]
+    end
+
+    CODE --> PR --> CI
+    BUILD --> TEST --> SCAN --> DOCKER
+    MERGE --> CD
+    STAGING --> SMOKE -->|"Pass"| PROD
+    SMOKE -->|"Fail"| ROLLBACK["Rollback"]
+```
+
+---
+
+## Network Topology
+
+### Request Flow - Detailed
+
+```mermaid
+flowchart TD
+    subgraph Client["Client Layer"]
+        BROWSER["Browser\nlocalhost:5173"]
+    end
+
+    subgraph ViteProxy["Vite Dev Proxy\n(Development Only)"]
+        PROXY["/api/* → :8080"]
+    end
+
+    subgraph GatewayLayer["Gateway Layer"]
+        GW["Spring Cloud Gateway\nNetty :8080\nReactive WebFlux"]
+        LB["Spring Cloud LoadBalancer\nRound Robin"]
+        EUREKA["Eureka Registry\n:8761\nService Instances Map"]
+    end
+
+    subgraph ServiceMesh["Service Mesh"]
+        US["user-service\nlocalhost:8081"]
+        PS["product-service\nlocalhost:8082"]
+        OS["order-service\nlocalhost:8083"]
+        PMS["payment-service\nlocalhost:8084"]
+    end
+
+    subgraph DataLayer["Data Layer"]
+        PG["PostgreSQL\n:5432"]
+        REDIS["Redis\n:6379"]
+        KAFKA["Kafka\n:9092"]
+    end
+
+    BROWSER -->|"HTTP /api/v1/**"| PROXY
+    PROXY -->|"Forward"| GW
+    GW -->|"1. Resolve lb://service-name"| EUREKA
+    EUREKA -->|"2. Return host:port"| LB
+    LB -->|"3. Route to instance"| US & PS & OS & PMS
+    US & PS --> REDIS
+    US & PS & OS & PMS --> PG
+    US & OS & PMS -->|"Publish events"| KAFKA
+```
+
+---
+
+## Observability Stack
+
+```mermaid
+graph TB
+    subgraph Services["Microservices"]
+        S1["user-service\n/actuator/metrics\n/actuator/health\n/actuator/prometheus"]
+        S2["product-service"]
+        S3["order-service"]
+        S4["payment-service"]
+    end
+
+    subgraph Metrics["Metrics Pipeline"]
+        PROM["Prometheus\nScrape every 15s"]
+        GRAF["Grafana\nDashboards"]
+    end
+
+    subgraph Tracing["Distributed Tracing"]
+        OTEL["OpenTelemetry SDK\nTrace context propagation"]
+        JAEGER["Jaeger / Zipkin\nTrace visualization"]
+    end
+
+    subgraph Logging["Logging"]
+        LOG["Structured JSON logs\npattern: timestamp thread level logger msg"]
+        ELK["ELK Stack\nElasticsearch · Logstash · Kibana"]
+    end
+
+    S1 & S2 & S3 & S4 -->|"Micrometer metrics"| PROM
+    PROM --> GRAF
+    S1 & S2 & S3 & S4 -->|"OTLP traces"| OTEL
+    OTEL --> JAEGER
+    S1 & S2 & S3 & S4 -->|"Log output"| LOG
+    LOG --> ELK
+```
+
+---
+
+## Resilience Patterns
+
+```mermaid
+flowchart TD
+    REQ["Incoming Request"] --> CB{"Circuit\nBreaker\nState?"}
+
+    CB -->|"CLOSED\n(normal)"| SVC["Call Service"]
+    CB -->|"OPEN\n(failing)"| FB["Return Fallback\n503 / cached data"]
+    CB -->|"HALF-OPEN\n(testing)"| PROBE["Allow 3 probe calls"]
+
+    SVC -->|"Success"| RESP["Return Response"]
+    SVC -->|"Failure"| RETRY{"Retry?\n(max 3)"}
+    RETRY -->|"Retry"| SVC
+    RETRY -->|"Exhausted"| CB_OPEN["Trip Circuit\nOpen for 5s"]
+
+    PROBE -->|"Success"| CB_CLOSE["Close Circuit"]
+    PROBE -->|"Failure"| CB_OPEN
+
+    subgraph Config["Resilience4j Config"]
+        C1["slidingWindowSize: 10"]
+        C2["failureRateThreshold: 50%"]
+        C3["waitDurationInOpenState: 5s"]
+        C4["maxAttempts: 3"]
+        C5["waitDuration: 500ms"]
+    end
+```
+
+---
+
+## Data Flow - Product Purchase
+
+### End-to-End Purchase Journey
+
+```mermaid
+flowchart LR
+    subgraph FE["Frontend"]
+        BROWSE["Browse Products\nGET /api/v1/products"]
+        CART["Add to Cart\n(localStorage)"]
+        CHECKOUT["Checkout Form\nAddress + Payment"]
+        CONFIRM["Order Confirmed\n/orders/:id"]
+    end
+
+    subgraph BE["Backend Services"]
+        GW2["API Gateway"]
+        OS2["Order Service\nCreate order\nCalculate totals"]
+        PMS2["Payment Service\nProcess payment"]
+        NS2["Notification\nSend email"]
+    end
+
+    subgraph DB["Persistence"]
+        ODB[("orders DB\nINSERT order\nINSERT order_items")]
+        PDB[("payments DB\nINSERT payment")]
+        KF2[("Kafka\norder-events\npayment-events")]
+    end
+
+    BROWSE --> CART --> CHECKOUT
+    CHECKOUT -->|"POST /api/v1/orders"| GW2
+    GW2 --> OS2
+    OS2 --> ODB
+    OS2 -->|"Initiate"| PMS2
+    PMS2 --> PDB
+    PMS2 -->|"payment-events.COMPLETED"| KF2
+    OS2 -->|"order-events.CONFIRMED"| KF2
+    KF2 --> NS2
+    NS2 -->|"Email"| CONFIRM
+```

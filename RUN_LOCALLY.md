@@ -209,6 +209,7 @@ PUT  /api/v1/payments/{id}/refund
 | Notification Service | 8085 | http://localhost:8085 | Notifications |
 | Eureka Dashboard | 8761 | http://localhost:8761 | Service discovery |
 | Frontend | 5173 | http://localhost:5173 | React app |
+| MailHog (email UI) | 8025 | http://localhost:8025 | Catch all emails locally |
 | PostgreSQL | 5432 | localhost:5432 | Database |
 | Redis | 6379 | localhost:6379 | Cache |
 | Kafka | 9092 | localhost:9092 | Events |
