@@ -8,6 +8,10 @@ import com.toyshop.backend.product.exception.SkuAlreadyExistsException;
 import com.toyshop.backend.product.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -28,9 +32,19 @@ public class ProductService {
 
     private final ProductRepository productRepository;
 
+    @Value("${app.cache.product-ttl:1800}")
+    private long productCacheTtl;
+
+    @Value("${app.cache.category-ttl:3600}")
+    private long categoryCacheTtl;
+
+    @Value("${app.cache.page-ttl:300}")
+    private long pageCacheTtl;
+
     /**
      * Create a new product.
      */
+    @CacheEvict(value = "productPages", allEntries = true)
     @Transactional
     public ProductResponse createProduct(ProductRequest request) {
         log.info("Creating new product with SKU: {}", request.getSku());
@@ -68,6 +82,7 @@ public class ProductService {
     /**
      * Get product by ID.
      */
+    @Cacheable(value = "products", key = "#productId")
     @Transactional(readOnly = true)
     public ProductResponse getProductById(UUID productId) {
         log.debug("Fetching product by ID: {}", productId);
@@ -79,6 +94,7 @@ public class ProductService {
     /**
      * Get product by SKU.
      */
+    @Cacheable(value = "products", key = "#sku")
     @Transactional(readOnly = true)
     public ProductResponse getProductBySku(String sku) {
         log.debug("Fetching product by SKU: {}", sku);
@@ -90,6 +106,7 @@ public class ProductService {
     /**
      * Get all products with pagination.
      */
+    @Cacheable(value = "productPages", key = "{#pageable.pageNumber, #pageable.pageSize, #pageable.sort}")
     @Transactional(readOnly = true)
     public Page<ProductResponse> getAllProducts(Pageable pageable) {
         log.debug("Fetching all products with pagination");
@@ -156,6 +173,7 @@ public class ProductService {
     /**
      * Get all categories.
      */
+    @Cacheable(value = "categories", key = "'all'")
     @Transactional(readOnly = true)
     public List<String> getAllCategories() {
         log.debug("Fetching all categories");
@@ -165,6 +183,10 @@ public class ProductService {
     /**
      * Update product.
      */
+    @Caching(evict = {
+        @CacheEvict(value = "products", key = "#productId"),
+        @CacheEvict(value = "productPages", allEntries = true)
+    })
     @Transactional
     public ProductResponse updateProduct(UUID productId, ProductRequest request) {
         log.info("Updating product: {}", productId);
@@ -206,6 +228,10 @@ public class ProductService {
     /**
      * Update product stock.
      */
+    @Caching(evict = {
+        @CacheEvict(value = "products", key = "#productId"),
+        @CacheEvict(value = "productPages", allEntries = true)
+    })
     @Transactional
     public ProductResponse updateStock(UUID productId, int quantityChange) {
         log.info("Updating stock for product {} by {}", productId, quantityChange);
@@ -233,6 +259,10 @@ public class ProductService {
     /**
      * Delete product.
      */
+    @Caching(evict = {
+        @CacheEvict(value = "products", key = "#productId"),
+        @CacheEvict(value = "productPages", allEntries = true)
+    })
     @Transactional
     public void deleteProduct(UUID productId) {
         log.info("Deleting product: {}", productId);

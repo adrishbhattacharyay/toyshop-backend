@@ -9,8 +9,10 @@ import com.toyshop.user.exception.*;
 import com.toyshop.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -33,6 +35,12 @@ public class UserService {
     private final KafkaTemplate<String, UserEvent> kafkaTemplate;
     private final com.toyshop.user.security.JwtUtil jwtUtil;
     private static final String USER_EVENTS_TOPIC = "user-events";
+
+    @Value("${app.cache.user-ttl:3600}")
+    private long userCacheTtl;
+
+    @Value("${app.cache.session-ttl:1800}")
+    private long sessionCacheTtl;
 
     @Transactional
     public UserResponse register(RegistrationRequest request) {
@@ -171,7 +179,10 @@ public class UserService {
     }
 
     @Transactional
-    @CacheEvict(value = "users", key = "#id")
+    @Caching(evict = {
+        @CacheEvict(value = "users", key = "#id"),
+        @CacheEvict(value = "userTokens", allEntries = true)
+    })
     public UserResponse updateUser(Long id, UpdateUserRequest request) {
         log.info("Updating user with ID: {}", id);
 
@@ -202,6 +213,10 @@ public class UserService {
         return UserResponse.from(updatedUser);
     }
 
+    @Caching(evict = {
+        @CacheEvict(value = "users", key = "#id"),
+        @CacheEvict(value = "userTokens", allEntries = true)
+    })
     @Transactional
     public void deleteUser(Long id) {
         log.info("Deleting user with ID: {}", id);
@@ -226,6 +241,7 @@ public class UserService {
         }
     }
 
+    @CacheEvict(value = "userTokens", allEntries = true)
     @Transactional
     public void changePassword(Long id, String currentPassword, String newPassword) {
         log.info("Changing password for user ID: {}", id);

@@ -8,6 +8,14 @@ spring:
     url: jdbc:postgresql://localhost:5432/toyshop_orders
     username: toyshop
     password: toyshop_secret
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 30
+      minimum-idle: 10
+      connection-timeout: 20000
+      idle-timeout: 300000
+      max-lifetime: 1800000
+      leak-detection-threshold: 60000
   jpa:
     hibernate:
       ddl-auto: update
